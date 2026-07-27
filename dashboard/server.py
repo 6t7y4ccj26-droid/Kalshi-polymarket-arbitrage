@@ -47,6 +47,7 @@ class DashboardState:
             "kalshi_orderbooks": 0,  # Number of Kalshi orderbooks fetched
             "cross_opportunities": [],
             "matched_pairs_data": [],  # Detailed data for display
+            "rejection_diagnostics": [],  # Closest rejected pairs with reasons
             "matching_progress": 0,  # Percentage of matching complete
             "matching_checked": 0,  # Number of comparisons done
             "matching_total": 0,  # Total comparisons to do
@@ -677,6 +678,86 @@ def get_embedded_html() -> str:
             border-radius: 12px;
             font-size: 0.7rem;
             font-weight: 600;
+        }
+
+        .diagnostics-card {
+            grid-column: span 2;
+            border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+
+        .diagnostics-summary {
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .diagnostics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .diagnostic-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 0.85rem;
+        }
+
+        .diagnostic-item.review {
+            border-color: rgba(245, 158, 11, 0.6);
+        }
+
+        .diagnostic-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.55rem;
+        }
+
+        .diagnostic-confidence {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-yellow);
+            white-space: nowrap;
+        }
+
+        .diagnostic-market {
+            font-size: 0.78rem;
+            line-height: 1.35;
+            margin: 0.35rem 0;
+        }
+
+        .diagnostic-platform {
+            color: var(--text-muted);
+            font-size: 0.66rem;
+            text-transform: uppercase;
+        }
+
+        .diagnostic-reasons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-top: 0.65rem;
+        }
+
+        .diagnostic-reason {
+            border-radius: 999px;
+            background: rgba(239, 68, 68, 0.14);
+            color: #fca5a5;
+            font-size: 0.65rem;
+            padding: 0.2rem 0.45rem;
+        }
+
+        .diagnostic-review {
+            color: var(--accent-yellow);
+            font-size: 0.68rem;
+            font-weight: 700;
+        }
+
+        @media (max-width: 800px) {
+            .diagnostics-grid {
+                grid-template-columns: 1fr;
+            }
         }
         
         /* Live Opportunities Feed */
@@ -1511,6 +1592,22 @@ def get_embedded_html() -> str:
             </div>
         </section>
         
+        <!-- Closest rejected contract candidates -->
+        <section class="card diagnostics-card">
+            <div class="card-header">
+                <span class="card-title">🧭 Rejection Diagnostics</span>
+                <span id="diagnosticsCount" style="font-size: 0.75rem; color: var(--text-secondary);">0 candidates</span>
+            </div>
+            <div class="card-body">
+                <div class="diagnostics-summary" id="diagnosticsSummary">
+                    Waiting for the first strict matching pass...
+                </div>
+                <div class="diagnostics-grid" id="diagnosticsGrid">
+                    <div style="color: var(--text-secondary);">No diagnostics yet.</div>
+                </div>
+            </div>
+        </section>
+
         <!-- 🔥 LIVE OPPORTUNITIES FEED -->
         <section class="card opportunities-feed">
             <div class="card-header">
@@ -2068,6 +2165,7 @@ def get_embedded_html() -> str:
             
             const crossOpps = cp.cross_opportunities || [];
             const matchedPairsData = cp.matched_pairs_data || [];
+            updateRejectionDiagnostics(cp);
             document.getElementById('crossOpportunities').textContent = crossOpps.length;
             
             // 🔥 Update Live Opportunities Feed
@@ -2150,6 +2248,49 @@ def get_embedded_html() -> str:
                             </span>
                         </div>
                     </div>
+                `;
+            }).join('');
+        }
+
+        function updateRejectionDiagnostics(cp) {
+            const diagnostics = cp.rejection_diagnostics || [];
+            const grid = document.getElementById('diagnosticsGrid');
+            const count = document.getElementById('diagnosticsCount');
+            const summary = document.getElementById('diagnosticsSummary');
+            count.textContent = `${diagnostics.length} candidate${diagnostics.length === 1 ? '' : 's'}`;
+
+            if (diagnostics.length === 0) {
+                const complete = cp.matching_status === 'complete';
+                summary.textContent = complete
+                    ? 'No title-level candidates were close enough for a meaningful diagnostic.'
+                    : 'Waiting for the first strict matching pass...';
+                grid.innerHTML = '<div style="color: var(--text-secondary);">No diagnostics yet.</div>';
+                return;
+            }
+
+            const reviewCount = diagnostics.filter(
+                item => item.manual_review_recommended
+            ).length;
+            summary.textContent = `${reviewCount} candidate${reviewCount === 1 ? '' : 's'} may be worth manual rule review. A diagnostic is not an arbitrage alert.`;
+            grid.innerHTML = diagnostics.slice(0, 12).map(item => {
+                const reasons = (item.rejection_reasons || []).map(reason =>
+                    `<span class="diagnostic-reason">${escapeHtml(reason.replaceAll('_', ' '))}</span>`
+                ).join('');
+                const polyDates = (item.polymarket_dates || []).join(', ') || 'unknown';
+                const kalshiDates = (item.kalshi_dates || []).join(', ') || 'unknown';
+                return `
+                    <article class="diagnostic-item ${item.manual_review_recommended ? 'review' : ''}">
+                        <div class="diagnostic-heading">
+                            <span>${escapeHtml((item.category || 'other').toUpperCase())}</span>
+                            <span class="diagnostic-confidence">${((item.confidence || 0) * 100).toFixed(0)}% confidence</span>
+                        </div>
+                        <div class="diagnostic-platform">Polymarket · ${escapeHtml(polyDates)}</div>
+                        <div class="diagnostic-market">${escapeHtml(truncate(item.polymarket_question || '', 105))}</div>
+                        <div class="diagnostic-platform">Kalshi · ${escapeHtml(kalshiDates)}</div>
+                        <div class="diagnostic-market">${escapeHtml(truncate(item.kalshi_title || '', 105))}</div>
+                        ${item.manual_review_recommended ? '<div class="diagnostic-review">⚠ Manual rule review suggested</div>' : ''}
+                        <div class="diagnostic-reasons">${reasons}</div>
+                    </article>
                 `;
             }).join('');
         }
@@ -2309,6 +2450,16 @@ def get_embedded_html() -> str:
             if (!str) return '';
             return str.length > len ? str.substring(0, len) + '...' : str;
         }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            })[char]);
+        }
         
         function updateMarkets() {
             const list = document.getElementById('marketList');
@@ -2432,4 +2583,3 @@ def get_embedded_html() -> str:
 
 # Create the app
 app = create_app()
-

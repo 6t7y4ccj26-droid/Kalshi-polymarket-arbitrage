@@ -37,6 +37,27 @@ class ContractMatch:
     outcome_alignment: str = "same"
 
 
+@dataclass(frozen=True)
+class MatchDiagnostic:
+    """A rejected candidate with enough evidence for safe human review."""
+
+    polymarket_id: str
+    polymarket_question: str
+    kalshi_ticker: str
+    kalshi_title: str
+    category: str
+    similarity: float
+    confidence: float
+    polymarket_dates: tuple[str, ...]
+    kalshi_dates: tuple[str, ...]
+    positive_evidence: tuple[str, ...]
+    rejection_reasons: tuple[str, ...]
+    manual_review_recommended: bool
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 @dataclass
 class MarketPair:
     """A strict, auditable pair of equivalent binary contracts."""
@@ -230,6 +251,7 @@ class MarketMatcher:
         self.ambiguity_margin = ambiguity_margin
         self.require_date_evidence = require_date_evidence
         self._matched_pairs: dict[str, MarketPair] = {}
+        self._rejection_diagnostics: list[MatchDiagnostic] = []
 
     def normalize_text(self, text: str) -> str:
         words = re.sub(r"[^\w%$.\s-]", " ", text.lower()).split()
@@ -308,6 +330,66 @@ class MarketMatcher:
         if category == "other" or len(dates) != 1:
             return None
         return category, next(iter(dates))
+
+    def _market_dates(
+        self, text: str, metadata_date: Optional[datetime]
+    ) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    value
+                    for value in (
+                        self.extract_date(text),
+                        metadata_date.date().isoformat() if metadata_date else None,
+                    )
+                    if value
+                }
+            )
+        )
+
+    def _diagnostic(
+        self,
+        poly: Market,
+        kalshi: KalshiMarket,
+        result: ContractMatch,
+        additional_rejection_reasons: tuple[str, ...] = (),
+    ) -> MatchDiagnostic:
+        poly_text = " ".join(filter(None, (poly.question, poly.description)))
+        kalshi_text = " ".join(
+            filter(None, (kalshi.title, kalshi.subtitle, kalshi.rules_primary))
+        )
+        hard_blockers = {
+            "category_mismatch_or_unknown",
+            "date_mismatch",
+            "internally_inconsistent_date",
+            "threshold_or_direction_mismatch",
+            "outcome_direction_mismatch",
+            "settlement_rule_mismatch",
+            "ambiguous_polymarket_candidate",
+            "ambiguous_kalshi_mapping",
+        }
+        rejection_reasons = tuple(
+            dict.fromkeys((*result.rejection_reasons, *additional_rejection_reasons))
+        )
+        manual_review = result.similarity >= 0.55 and not hard_blockers.intersection(
+            rejection_reasons
+        )
+        return MatchDiagnostic(
+            polymarket_id=poly.market_id,
+            polymarket_question=poly.question,
+            kalshi_ticker=kalshi.ticker,
+            kalshi_title=kalshi.title,
+            category=result.category,
+            similarity=result.similarity,
+            confidence=result.confidence,
+            polymarket_dates=self._market_dates(poly_text, poly.end_date),
+            kalshi_dates=self._market_dates(
+                kalshi_text, kalshi.expiration_time or kalshi.close_time
+            ),
+            positive_evidence=tuple(result.reasons),
+            rejection_reasons=rejection_reasons,
+            manual_review_recommended=manual_review,
+        )
 
     def calculate_similarity(
         self, polymarket_question: str, kalshi_title: str
@@ -455,8 +537,11 @@ class MarketMatcher:
     ) -> list[MarketPair]:
         """Find only unique, high-confidence matches; reject close runners-up."""
         candidates: list[tuple[Market, KalshiMarket, ContractMatch]] = []
+        diagnostics: list[MatchDiagnostic] = []
         comparisons = 0
         kalshi_index: dict[tuple[str, str], list[KalshiMarket]] = {}
+        kalshi_by_ticker: dict[str, KalshiMarket] = {}
+        token_index: dict[str, dict[str, set[str]]] = {}
         for kalshi in (market for market in kalshi_markets if market.is_active):
             kalshi_text = " ".join(
                 filter(
@@ -464,6 +549,18 @@ class MarketMatcher:
                     (kalshi.title, kalshi.subtitle, kalshi.rules_primary),
                 )
             )
+            category = self._categorize_market(kalshi_text)
+            kalshi_by_ticker[kalshi.ticker] = kalshi
+            normalized_tokens = {
+                token
+                for token in self.normalize_text(kalshi.title).split()
+                if len(token) >= 3
+            }
+            for index_category in {category, "*"}:
+                category_tokens = token_index.setdefault(index_category, {})
+                for token in normalized_tokens:
+                    if token:
+                        category_tokens.setdefault(token, set()).add(kalshi.ticker)
             key = self._candidate_key(
                 kalshi_text,
                 kalshi.expiration_time or kalshi.close_time,
@@ -471,31 +568,61 @@ class MarketMatcher:
             if key:
                 kalshi_index.setdefault(key, []).append(kalshi)
 
-        poly_candidates: list[tuple[Market, list[KalshiMarket]]] = []
+        poly_candidates: list[tuple[Market, list[KalshiMarket], list[KalshiMarket]]] = (
+            []
+        )
         for poly in (
             market
             for market in polymarket_markets
             if market.active and not market.closed
         ):
-            key = self._candidate_key(
-                " ".join(filter(None, (poly.question, poly.description))),
-                poly.end_date,
-            )
-            if key and kalshi_index.get(key):
-                poly_candidates.append((poly, kalshi_index[key]))
+            poly_text = " ".join(filter(None, (poly.question, poly.description)))
+            key = self._candidate_key(poly_text, poly.end_date)
+            exact_candidates = kalshi_index.get(key, []) if key else []
+
+            category = self._categorize_market(poly_text)
+            candidate_counts: dict[str, int] = {}
+            poly_tokens = set(self.normalize_text(poly.question).split())
+            for token in poly_tokens:
+                for ticker in token_index.get(category, {}).get(token, ()):
+                    candidate_counts[ticker] = candidate_counts.get(ticker, 0) + 1
+            # Unknown category metadata is common in Kalshi's bulk feed. Use
+            # the global title index only for diagnostics, never acceptance.
+            if not candidate_counts:
+                for token in poly_tokens:
+                    for ticker in token_index.get("*", {}).get(token, ()):
+                        candidate_counts[ticker] = candidate_counts.get(ticker, 0) + 1
+            exact_tickers = {market.ticker for market in exact_candidates}
+            nearest_candidates = [
+                kalshi_by_ticker[ticker]
+                for ticker, shared_tokens in sorted(
+                    candidate_counts.items(),
+                    key=lambda item: (item[1], item[0]),
+                    reverse=True,
+                )
+                if shared_tokens >= 2 and ticker not in exact_tickers
+            ][:3]
+            if exact_candidates or nearest_candidates:
+                poly_candidates.append((poly, exact_candidates, nearest_candidates))
 
         total_comparisons = sum(
-            len(kalshi_candidates) for _, kalshi_candidates in poly_candidates
+            len(exact_candidates) for _, exact_candidates, _ in poly_candidates
         )
-        for poly, kalshi_candidates in poly_candidates:
+        for poly, kalshi_candidates, nearest_candidates in poly_candidates:
             ranked: list[tuple[KalshiMarket, ContractMatch]] = []
             for kalshi in kalshi_candidates:
                 result = self.evaluate_contracts(poly, kalshi)
                 comparisons += 1
                 if result.accepted:
                     ranked.append((kalshi, result))
+                else:
+                    diagnostics.append(self._diagnostic(poly, kalshi, result))
                 if on_progress and comparisons % 500 == 0:
                     on_progress(comparisons, total_comparisons, len(candidates))
+            for kalshi in nearest_candidates:
+                result = self.evaluate_contracts(poly, kalshi)
+                if not result.accepted:
+                    diagnostics.append(self._diagnostic(poly, kalshi, result))
             ranked.sort(key=lambda item: item[1].confidence, reverse=True)
             if not ranked:
                 continue
@@ -505,6 +632,15 @@ class MarketMatcher:
             if len(ranked) > 1 and gap < self.ambiguity_margin:
                 logger.warning(
                     "Rejected ambiguous match for %s (gap %.3f)", poly.market_id, gap
+                )
+                diagnostics.extend(
+                    self._diagnostic(
+                        poly,
+                        kalshi,
+                        result,
+                        ("ambiguous_polymarket_candidate",),
+                    )
+                    for kalshi, result in ranked
                 )
                 continue
             kalshi, result = ranked[0]
@@ -524,6 +660,15 @@ class MarketMatcher:
                 < self.ambiguity_margin
             ):
                 logger.warning("Rejected non-unique Kalshi mapping for %s", ticker)
+                diagnostics.extend(
+                    self._diagnostic(
+                        poly,
+                        kalshi,
+                        result,
+                        ("ambiguous_kalshi_mapping",),
+                    )
+                    for poly, kalshi, result in group
+                )
                 continue
             poly, kalshi, result = group[0]
             pair = MarketPair(
@@ -545,10 +690,22 @@ class MarketMatcher:
             self._matched_pairs[pair.pair_id] = pair
         if on_progress:
             on_progress(comparisons, total_comparisons, len(matches))
+        self._rejection_diagnostics = sorted(
+            diagnostics,
+            key=lambda item: (
+                item.manual_review_recommended,
+                item.confidence,
+                item.similarity,
+            ),
+            reverse=True,
+        )[:50]
         return matches
 
     def get_cached_pairs(self) -> list[MarketPair]:
         return list(self._matched_pairs.values())
+
+    def get_rejection_diagnostics(self) -> list[dict]:
+        return [item.to_dict() for item in self._rejection_diagnostics]
 
 
 @dataclass
