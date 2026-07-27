@@ -72,8 +72,10 @@ The cross-platform scanner is intentionally **paper-only**:
 - Results are ranked by conservative net edge, match confidence, and executable
   size and emitted as versioned, JSON-ready alert records.
 
-`mode.auto_execution_enabled` must remain `false`. Cross-platform findings are
-never sent to the execution engine in this milestone.
+`mode.trading_mode` must remain `dry_run` and `mode.auto_execution_enabled`
+must remain `false`; configuration validation rejects either unsafe setting.
+Cross-platform findings are never sent to the execution engine in this
+milestone.
 
 ---
 

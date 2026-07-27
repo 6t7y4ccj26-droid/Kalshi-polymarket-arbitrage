@@ -536,7 +536,10 @@ async def main_async(args: argparse.Namespace) -> None:
 
     # Override mode
     if args.live:
-        config.mode.trading_mode = "live"
+        logger.error(
+            "Live mode is disabled in this paper-scanner milestone; use --dry-run."
+        )
+        raise SystemExit(2)
     elif args.dry_run:
         config.mode.trading_mode = "dry_run"
 

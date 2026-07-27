@@ -252,6 +252,11 @@ def _validate_config(config: BotConfig) -> None:
     if config.mode.trading_mode.lower() not in ("live", "dry_run"):
         errors.append("mode.trading_mode must be 'live' or 'dry_run'")
 
+    if config.mode.trading_mode.lower() != "dry_run":
+        errors.append(
+            "mode.trading_mode must remain 'dry_run' in this paper-scanner milestone"
+        )
+
     if config.mode.auto_execution_enabled:
         errors.append(
             "mode.auto_execution_enabled must remain false in this paper-scanner milestone"
