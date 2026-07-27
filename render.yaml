@@ -8,6 +8,10 @@ services:
     autoDeployTrigger: commit
     healthCheckPath: /api/health
     numInstances: 1
+    disk:
+      name: scanner-logs
+      mountPath: /app/logs
+      sizeGB: 1
     envVars:
       - key: PAPER_SCANNER_ONLY
         value: "true"

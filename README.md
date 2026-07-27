@@ -245,6 +245,8 @@ scanner after your laptop is closed.
   variable.
 - The Blueprint uses one paid Starter web-service instance because free
   instances can sleep and are not suitable for continuous monitoring.
+- A 1 GB persistent disk is mounted at `/app/logs` so paper results survive
+  service restarts and redeployments.
 
 Deploy from `render.yaml`, select this repository, and confirm that the service
 uses the `main` branch. Do not add wallet keys or trading credentials for the

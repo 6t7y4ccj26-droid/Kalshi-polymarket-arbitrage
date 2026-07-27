@@ -25,4 +25,9 @@ def test_render_blueprint_is_single_instance_paid_paper_service():
     assert service["branch"] == "main"
     assert service["numInstances"] == 1
     assert service["healthCheckPath"] == "/api/health"
+    assert service["disk"] == {
+        "name": "scanner-logs",
+        "mountPath": "/app/logs",
+        "sizeGB": 1,
+    }
     assert service["envVars"] == [{"key": "PAPER_SCANNER_ONLY", "value": "true"}]
