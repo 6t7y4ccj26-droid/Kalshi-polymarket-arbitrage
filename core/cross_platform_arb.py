@@ -290,6 +290,25 @@ class MarketMatcher:
             for match in self.THRESHOLD_PATTERN.finditer(text)
         }
 
+    def _candidate_key(
+        self,
+        text: str,
+        metadata_date: Optional[datetime],
+    ) -> Optional[tuple[str, str]]:
+        """Build a conservative category/date key before fuzzy comparison."""
+        category = self._categorize_market(text)
+        dates = {
+            value
+            for value in (
+                self.extract_date(text),
+                metadata_date.date().isoformat() if metadata_date else None,
+            )
+            if value
+        }
+        if category == "other" or len(dates) != 1:
+            return None
+        return category, next(iter(dates))
+
     def calculate_similarity(
         self, polymarket_question: str, kalshi_title: str
     ) -> float:
@@ -437,23 +456,46 @@ class MarketMatcher:
         """Find only unique, high-confidence matches; reject close runners-up."""
         candidates: list[tuple[Market, KalshiMarket, ContractMatch]] = []
         comparisons = 0
+        kalshi_index: dict[tuple[str, str], list[KalshiMarket]] = {}
+        for kalshi in (market for market in kalshi_markets if market.is_active):
+            kalshi_text = " ".join(
+                filter(
+                    None,
+                    (kalshi.title, kalshi.subtitle, kalshi.rules_primary),
+                )
+            )
+            key = self._candidate_key(
+                kalshi_text,
+                kalshi.expiration_time or kalshi.close_time,
+            )
+            if key:
+                kalshi_index.setdefault(key, []).append(kalshi)
+
+        poly_candidates: list[tuple[Market, list[KalshiMarket]]] = []
         for poly in (
             market
             for market in polymarket_markets
             if market.active and not market.closed
         ):
+            key = self._candidate_key(
+                " ".join(filter(None, (poly.question, poly.description))),
+                poly.end_date,
+            )
+            if key and kalshi_index.get(key):
+                poly_candidates.append((poly, kalshi_index[key]))
+
+        total_comparisons = sum(
+            len(kalshi_candidates) for _, kalshi_candidates in poly_candidates
+        )
+        for poly, kalshi_candidates in poly_candidates:
             ranked: list[tuple[KalshiMarket, ContractMatch]] = []
-            for kalshi in (market for market in kalshi_markets if market.is_active):
+            for kalshi in kalshi_candidates:
                 result = self.evaluate_contracts(poly, kalshi)
                 comparisons += 1
                 if result.accepted:
                     ranked.append((kalshi, result))
                 if on_progress and comparisons % 500 == 0:
-                    on_progress(
-                        comparisons,
-                        len(polymarket_markets) * len(kalshi_markets),
-                        len(candidates),
-                    )
+                    on_progress(comparisons, total_comparisons, len(candidates))
             ranked.sort(key=lambda item: item[1].confidence, reverse=True)
             if not ranked:
                 continue
@@ -502,7 +544,7 @@ class MarketMatcher:
             matches.append(pair)
             self._matched_pairs[pair.pair_id] = pair
         if on_progress:
-            on_progress(comparisons, comparisons, len(matches))
+            on_progress(comparisons, total_comparisons, len(matches))
         return matches
 
     def get_cached_pairs(self) -> list[MarketPair]:
