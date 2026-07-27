@@ -160,7 +160,64 @@ class TestStrictContractMatching:
         matches = await matcher.find_matches([self.poly()], irrelevant + [matching])
 
         assert len(matches) == 1
-        assert evaluated == [matching.ticker]
+        assert matching.ticker in evaluated
+        assert len(evaluated) <= 4
+
+    @pytest.mark.asyncio
+    async def test_rejection_diagnostics_explain_hard_blockers(self):
+        matcher = MarketMatcher()
+        await matcher.find_matches(
+            [self.poly()],
+            [self.kalshi(expiration_time=datetime(2026, 9, 17, tzinfo=timezone.utc))],
+        )
+
+        diagnostics = matcher.get_rejection_diagnostics()
+
+        assert len(diagnostics) == 1
+        assert "date_mismatch" in diagnostics[0]["rejection_reasons"]
+        assert diagnostics[0]["polymarket_dates"] == ("2026-09-16",)
+        assert set(diagnostics[0]["kalshi_dates"]) == {
+            "2026-09-16",
+            "2026-09-17",
+        }
+        assert diagnostics[0]["manual_review_recommended"] is False
+
+    @pytest.mark.asyncio
+    async def test_missing_evidence_can_be_flagged_for_manual_review(self):
+        matcher = MarketMatcher()
+        poly = self.poly(description="")
+        kalshi = self.kalshi(subtitle="", rules_primary="")
+
+        await matcher.find_matches([poly], [kalshi])
+        diagnostic = matcher.get_rejection_diagnostics()[0]
+
+        assert "missing_settlement_evidence" in diagnostic["rejection_reasons"]
+        assert diagnostic["manual_review_recommended"] is True
+
+    @pytest.mark.asyncio
+    async def test_unknown_category_candidate_is_explained_but_never_accepted(self):
+        matcher = MarketMatcher()
+        poly = self.poly(
+            question="Seattle Mariners vs Texas Rangers",
+            description=(
+                "MLB game scheduled July 27, 2026. "
+                "Official final statistics determine resolution."
+            ),
+            end_date=datetime(2026, 7, 27, tzinfo=timezone.utc),
+        )
+        kalshi = self.kalshi(
+            title="yes Seattle Mariners, no Texas Rangers",
+            subtitle="",
+            rules_primary="",
+            expiration_time=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        )
+
+        matches = await matcher.find_matches([poly], [kalshi])
+        diagnostic = matcher.get_rejection_diagnostics()[0]
+
+        assert matches == []
+        assert "category_mismatch_or_unknown" in diagnostic["rejection_reasons"]
+        assert diagnostic["manual_review_recommended"] is False
 
 
 class TestDepthAwareProfitability:

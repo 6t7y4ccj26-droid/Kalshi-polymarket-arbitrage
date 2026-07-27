@@ -446,6 +446,9 @@ class TradingBotWithDashboard:
             self._matched_pairs = await loop.run_in_executor(
                 executor, run_matching_sync
             )
+            dashboard_state.cross_platform["rejection_diagnostics"] = (
+                self.market_matcher.get_rejection_diagnostics()
+            )
 
             dashboard_state.cross_platform["matching_status"] = "complete"
             dashboard_state.cross_platform["matching_progress"] = 100
