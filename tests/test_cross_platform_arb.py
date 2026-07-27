@@ -219,6 +219,46 @@ class TestStrictContractMatching:
         assert "category_mismatch_or_unknown" in diagnostic["rejection_reasons"]
         assert diagnostic["manual_review_recommended"] is False
 
+    @pytest.mark.asyncio
+    async def test_ambiguous_accepted_candidates_are_explained(self):
+        matcher = MarketMatcher()
+        first = self.kalshi(ticker="KXFED-26SEP16-H0")
+        second = self.kalshi(ticker="KXFED-26SEP16-H1")
+
+        matches = await matcher.find_matches([self.poly()], [first, second])
+        diagnostics = matcher.get_rejection_diagnostics()
+
+        assert matches == []
+        assert {item["kalshi_ticker"] for item in diagnostics} == {
+            first.ticker,
+            second.ticker,
+        }
+        assert all(
+            "ambiguous_polymarket_candidate" in item["rejection_reasons"]
+            for item in diagnostics
+        )
+        assert all(not item["manual_review_recommended"] for item in diagnostics)
+
+    @pytest.mark.asyncio
+    async def test_non_unique_kalshi_mapping_is_explained(self):
+        matcher = MarketMatcher()
+        first = self.poly(market_id="poly-fed-1")
+        second = self.poly(market_id="poly-fed-2")
+
+        matches = await matcher.find_matches([first, second], [self.kalshi()])
+        diagnostics = matcher.get_rejection_diagnostics()
+
+        assert matches == []
+        assert {item["polymarket_id"] for item in diagnostics} == {
+            first.market_id,
+            second.market_id,
+        }
+        assert all(
+            "ambiguous_kalshi_mapping" in item["rejection_reasons"]
+            for item in diagnostics
+        )
+        assert all(not item["manual_review_recommended"] for item in diagnostics)
+
 
 class TestDepthAwareProfitability:
     def test_walks_depth_and_stops_before_unprofitable_levels(self):

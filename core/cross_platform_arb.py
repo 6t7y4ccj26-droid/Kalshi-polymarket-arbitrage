@@ -352,6 +352,7 @@ class MarketMatcher:
         poly: Market,
         kalshi: KalshiMarket,
         result: ContractMatch,
+        additional_rejection_reasons: tuple[str, ...] = (),
     ) -> MatchDiagnostic:
         poly_text = " ".join(filter(None, (poly.question, poly.description)))
         kalshi_text = " ".join(
@@ -364,9 +365,14 @@ class MarketMatcher:
             "threshold_or_direction_mismatch",
             "outcome_direction_mismatch",
             "settlement_rule_mismatch",
+            "ambiguous_polymarket_candidate",
+            "ambiguous_kalshi_mapping",
         }
+        rejection_reasons = tuple(
+            dict.fromkeys((*result.rejection_reasons, *additional_rejection_reasons))
+        )
         manual_review = result.similarity >= 0.55 and not hard_blockers.intersection(
-            result.rejection_reasons
+            rejection_reasons
         )
         return MatchDiagnostic(
             polymarket_id=poly.market_id,
@@ -381,7 +387,7 @@ class MarketMatcher:
                 kalshi_text, kalshi.expiration_time or kalshi.close_time
             ),
             positive_evidence=tuple(result.reasons),
-            rejection_reasons=tuple(result.rejection_reasons),
+            rejection_reasons=rejection_reasons,
             manual_review_recommended=manual_review,
         )
 
@@ -627,6 +633,15 @@ class MarketMatcher:
                 logger.warning(
                     "Rejected ambiguous match for %s (gap %.3f)", poly.market_id, gap
                 )
+                diagnostics.extend(
+                    self._diagnostic(
+                        poly,
+                        kalshi,
+                        result,
+                        ("ambiguous_polymarket_candidate",),
+                    )
+                    for kalshi, result in ranked
+                )
                 continue
             kalshi, result = ranked[0]
             candidates.append((poly, kalshi, result))
@@ -645,6 +660,15 @@ class MarketMatcher:
                 < self.ambiguity_margin
             ):
                 logger.warning("Rejected non-unique Kalshi mapping for %s", ticker)
+                diagnostics.extend(
+                    self._diagnostic(
+                        poly,
+                        kalshi,
+                        result,
+                        ("ambiguous_kalshi_mapping",),
+                    )
+                    for poly, kalshi, result in group
+                )
                 continue
             poly, kalshi, result = group[0]
             pair = MarketPair(
