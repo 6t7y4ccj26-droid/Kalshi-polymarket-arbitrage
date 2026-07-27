@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kalshi-polymarket-paper-scanner
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeployTrigger: commit
+    healthCheckPath: /api/health
+    numInstances: 1
+    envVars:
+      - key: PAPER_SCANNER_ONLY
+        value: "true"

@@ -197,7 +197,7 @@ risk:
 # Run bot with live dashboard
 python run_with_dashboard.py
 
-# Open http://localhost:8000 in your browser
+# Open http://localhost:8888 in your browser
 ```
 
 ### 4. Other Run Modes
@@ -231,7 +231,24 @@ The dashboard provides real-time visibility into bot operations:
 
 </div>
 
-Access at `http://localhost:8000` when running with `run_with_dashboard.py`
+Access at `http://localhost:8888` when running with `run_with_dashboard.py`
+
+## ☁️ Always-on paper scanner
+
+The repository includes a Docker image and a Render Blueprint for running the
+scanner after your laptop is closed.
+
+- The container command always includes `--dry-run`.
+- The application still rejects `--live`.
+- The cloud health endpoint reports that auto-execution is disabled.
+- Render receives its required public port through the `PORT` environment
+  variable.
+- The Blueprint uses one paid Starter web-service instance because free
+  instances can sleep and are not suitable for continuous monitoring.
+
+Deploy from `render.yaml`, select this repository, and confirm that the service
+uses the `main` branch. Do not add wallet keys or trading credentials for the
+paper-scanner milestone.
 
 ---
 
