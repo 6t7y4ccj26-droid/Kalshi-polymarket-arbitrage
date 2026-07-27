@@ -55,6 +55,28 @@
 - **📝 Comprehensive Logging** - Detailed logs for trades, opportunities, and errors
 - **🤖 Market Matching AI** - Automatically matches similar predictions across platforms using text similarity
 
+### Production-safety milestone
+
+The cross-platform scanner is intentionally **paper-only**:
+
+- Contract candidates must agree on category, event date, outcome direction,
+  thresholds, and available settlement-source language.
+- Ambiguous many-to-one and close-runner-up matches are rejected.
+- Opportunities buy complementary YES/NO outcomes and are priced by walking
+  executable depth on both books, not by trusting the displayed best quote.
+- Taker fees, a configurable slippage reserve, gas, minimum liquidity, stale
+  books, and minimum net profit are included conservatively.
+- A candidate is rejected if both complete legs cannot meet the minimum size.
+  Alert output requires fill-or-kill/abort-both handling and never permits
+  partial fills.
+- Results are ranked by conservative net edge, match confidence, and executable
+  size and emitted as versioned, JSON-ready alert records.
+
+`mode.trading_mode` must remain `dry_run` and `mode.auto_execution_enabled`
+must remain `false`; configuration validation rejects either unsafe setting.
+Cross-platform findings are never sent to the execution engine in this
+milestone.
+
 ---
 
 ## 🔄 Data Modes
