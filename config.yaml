@@ -74,6 +74,8 @@ risk:
 mode:
   # Trading mode: "live" or "dry_run"
   trading_mode: "dry_run"
+  # Safety invariant: this milestone emits paper alerts and never places cross-platform orders.
+  auto_execution_enabled: false
   
   # Data mode: "real" or "simulation"
   # - "real": Fetch actual order books from Polymarket CLOB API
@@ -115,4 +117,3 @@ monitoring:
   # Performance metrics
   track_latency: true
   track_fill_rates: true
-
