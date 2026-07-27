@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: free-paper-scanner
@@ -44,6 +45,35 @@ jobs:
           if [[ "$scanner_exit" -ne 0 && "$scanner_exit" -ne 124 && "$scanner_exit" -ne 130 ]]; then
             exit "$scanner_exit"
           fi
+
+      - name: Summarize paper results
+        id: summary
+        if: always()
+        shell: bash
+        run: |
+          candidate_count=$(grep -c "PAPER opportunity:" logs/bot.log 2>/dev/null || true)
+          candidate_count=${candidate_count:-0}
+          echo "candidate_count=$candidate_count" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Paper scanner result"
+            echo
+            echo "- Paper candidates detected: $candidate_count"
+            echo "- Trading mode: dry run"
+            echo "- Auto-execution: disabled"
+            echo
+            echo "Download the paper-scan artifact for complete logs and rejection diagnostics."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify through a GitHub issue
+        if: always() && steps.summary.outputs.candidate_count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_COUNT: ${{ steps.summary.outputs.candidate_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --title "Paper scanner found ${CANDIDATE_COUNT} candidate(s)" \
+            --body "The dry-run scanner found ${CANDIDATE_COUNT} paper candidate(s). No trades were placed. Review the run and its downloadable logs before making any decision: ${RUN_URL}"
 
       - name: Save paper-scan logs
         if: always()

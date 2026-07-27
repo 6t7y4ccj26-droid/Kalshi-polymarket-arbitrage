@@ -42,5 +42,9 @@ def test_free_workflow_is_scheduled_paper_only_and_bounded():
     assert "run_with_dashboard.py --dry-run" in workflow
     assert "--live" not in workflow
     assert "python -m pytest -q" in workflow
+    assert "issues: write" in workflow
+    assert 'grep -c "PAPER opportunity:"' in workflow
+    assert "gh issue create" in workflow
+    assert "No trades were placed." in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "retention-days: 7" in workflow

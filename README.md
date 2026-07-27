@@ -257,7 +257,9 @@ paper-scanner milestone.
 The `Free paper scanner` GitHub Actions workflow runs a paper-only scan on
 GitHub-hosted computers for up to 5.5 hours, starting every 6 hours. It also
 runs the test suite before each window and retains that run's logs as a
-downloadable artifact for 7 days.
+downloadable artifact for 7 days. Each run writes a summary, and a paper
+candidate creates a GitHub issue so the repository owner receives a visible
+alert. The alert is not a recommendation to trade.
 
 This option does not provide a continuously available dashboard and is not
 guaranteed to run at the exact scheduled minute. GitHub can automatically
