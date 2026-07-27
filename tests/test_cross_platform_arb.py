@@ -137,6 +137,31 @@ class TestStrictContractMatching:
         assert not result.accepted
         assert reason in result.rejection_reasons
 
+    @pytest.mark.asyncio
+    async def test_prefilters_candidates_by_category_and_exact_date(self):
+        matcher = MarketMatcher()
+        matching = self.kalshi()
+        irrelevant = [
+            self.kalshi(
+                ticker=f"KXFED-OTHER-{day}",
+                title=f"Will the Fed hold rates on September {day}, 2026?",
+                expiration_time=datetime(2026, 9, day, tzinfo=timezone.utc),
+            )
+            for day in range(1, 16)
+        ]
+        original_evaluate = matcher.evaluate_contracts
+        evaluated = []
+
+        def tracking_evaluate(poly, kalshi):
+            evaluated.append(kalshi.ticker)
+            return original_evaluate(poly, kalshi)
+
+        matcher.evaluate_contracts = tracking_evaluate
+        matches = await matcher.find_matches([self.poly()], irrelevant + [matching])
+
+        assert len(matches) == 1
+        assert evaluated == [matching.ticker]
+
 
 class TestDepthAwareProfitability:
     def test_walks_depth_and_stops_before_unprofitable_levels(self):
