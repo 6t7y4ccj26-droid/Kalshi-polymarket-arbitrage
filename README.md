@@ -252,6 +252,19 @@ Deploy from `render.yaml`, select this repository, and confirm that the service
 uses the `main` branch. Do not add wallet keys or trading credentials for the
 paper-scanner milestone.
 
+### Free laptop-independent alternative
+
+The `Free paper scanner` GitHub Actions workflow runs a paper-only scan on
+GitHub-hosted computers for up to 5.5 hours, starting every 6 hours. It also
+runs the test suite before each window and retains that run's logs as a
+downloadable artifact for 7 days.
+
+This option does not provide a continuously available dashboard and is not
+guaranteed to run at the exact scheduled minute. GitHub can automatically
+disable scheduled workflows in an inactive public repository after 60 days.
+Use the workflow's **Run workflow** button to start a scan immediately or to
+re-enable activity. No trading credentials are required.
+
 ---
 
 ## 📈 Trading Strategies
